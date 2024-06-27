@@ -1,0 +1,95 @@
+image: omega81dckr/env-scala-databricks-cli:latest
+
+
+stages:
+  - test
+  - deploy_snapshot
+  - deploy_release
+  - setup_dev
+  - setup_prod
+
+deploy_test:
+  stage: test
+  before_script:
+    - export DATABRICKS_CONFIG_FILE=$DEV_DATABRICKS_CONFIG_FILE
+    - export RELEASE_VERSION=`cat VERSION`.`date +%d`
+    - export ENVIRONMENT=dev
+  script:
+    - sbt clean coverage test coverageReport
+  artifacts:
+    when: always
+    paths:
+     - target/test-reports/TEST-*.xml
+     - target/scala-2.12/scoverage-report/*
+    reports:
+     # cobertura: target/scala-2.12/scoverage-report/scoverage.xml
+      junit: target/test-reports/TEST-*.xml
+  tags:
+    - Docker
+    - Cloud
+
+deploy_snapshot:
+  stage: deploy_snapshot
+  before_script:
+    - export DATABRICKS_CONFIG_FILE=$DEV_DATABRICKS_CONFIG_FILE
+  #  - export RELEASE_VERSION=`cat VERSION`.`date +%d`
+    - export RELEASE_VERSION=`cat VERSION`-`date +%m.%d`
+  script:
+    - sbt clean package
+    - echo $DATABRICKS_CONFIG_FILE
+    ##- dbfs mkdirs dbfs:/build/$CI_COMMIT_REF_NAME
+    - dbfs mkdirs dbfs:/build/snapshots
+    - dbfs cp --overwrite target/scala-2.12/*.jar dbfs:/build/snapshots/
+  tags:
+    - Docker
+    - Cloud
+
+deploy_release:
+  stage: deploy_release
+  before_script:
+    - export DATABRICKS_CONFIG_FILE=$PROD_DATABRICKS_CONFIG_FILE
+   # - export RELEASE_VERSION=$RELEASE_VERSION
+    - export RELEASE_VERSION=`cat VERSION`-`date +%m.%d`
+  script:
+    - sbt package
+    - echo $DATABRICKS_CONFIG_FILE
+    - echo $RELEASE_VERSION
+    ##- dbfs mkdirs dbfs:/build/$CI_COMMIT_REF_NAME
+    - dbfs mkdirs dbfs:/build/snapshots
+    - dbfs cp --overwrite target/scala-2.12/*.jar dbfs:/build/snapshots/
+   # - dbfs mkdirs dbfs:/build/release/$RELEASE_VERSION
+   # - dbfs cp --overwrite target/scala-2.12/com-sensata-data_office-data-analytics-pipeline_2.12-$RELEASE_VERSION.jar dbfs:/build/release/$RELEASE_VERSION/com-sensata-data_office-data-analytics-pipeline_2.12.jar
+   # - dbfs cp --overwrite target/scala-2.12/com-sensata-data_office-data-analytics-pipeline_2.12-$RELEASE_VERSION.jar dbfs:/build/release/current/com-sensata-data_office-data-analytics-pipeline_2.12-$RELEASE_VERSION.jar
+  only:
+    refs:
+      - master
+  tags:
+    - Docker
+
+setup_dev:
+  stage: setup_dev
+  before_script:
+    - export DATABRICKS_CONFIG_FILE=$DEV_DATABRICKS_CONFIG_FILE
+    - export RELEASE_VERSION=$RELEASE_VERSION
+  when: manual
+  script:
+    - databricks jobs create --json-file databricks/dev/run_dashboard_data_pipeline_job.json
+    - databricks jobs create --json-file databricks/dev/run_data_vacum_pipeline_job.json
+    - databricks jobs create --json-file databricks/dev/run_optimise_data_pipeline_job.json
+    - databricks jobs create --json-file databricks/dev/run_streaming_pipeline_job.json
+  tags:
+    - Docker
+
+setup_prod:
+  stage: setup_prod
+  before_script:
+    - export DATABRICKS_CONFIG_FILE=$PROD_DATABRICKS_CONFIG_FILE
+    - export RELEASE_VERSION=$RELEASE_VERSION
+  when: manual
+  script:
+    - databricks jobs create --json-file databricks/prod/run_dashboard_data_pipeline_job.json
+    - databricks jobs create --json-file databricks/prod/run_data_vacum_pipeline_job.json
+    - databricks jobs create --json-file databricks/prod/run_optimise_data_pipeline_job.json
+    - databricks jobs create --json-file databricks/prod/run_streaming_pipeline_job.json
+  tags:
+    - Docker
